@@ -220,19 +220,19 @@ func (p *Provider) startWatchingCluster(timeout time.Duration) error {
 
 	// error placeholder
 	var watcherr error
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	
+	var watcherr error
+	watcher, err := p.client.CoreV1().Pods(p.retrieveNamespace()).Watch(ctx, metav1.ListOptions{LabelSelector: selector, Watch: true, TimeoutSeconds: &watchTimeoutSeconds})
+	if err != nil {
+		watcherr = fmt.Errorf("unable to watch the cluster status: %w", err)
+		plog.Info(fmt.Sprintf("Occurred watch err %+v", watcherr))
+		return watcherr
+	}
 
 	// start a new goroutine to monitor the cluster events
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		watcher, err := p.client.CoreV1().Pods(p.retrieveNamespace()).Watch(ctx, metav1.ListOptions{LabelSelector: selector, Watch: true, TimeoutSeconds: &watchTimeoutSeconds})
-		if err != nil {
-			watcherr = fmt.Errorf("unable to watch the cluster status: %w", err)
-			plog.Info(fmt.Sprintf("Occurred watch err %+v", watcherr))
-			return
-		}
-
 		for !p.shutdown {
 
 			event, ok := <-watcher.ResultChan()
