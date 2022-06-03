@@ -209,6 +209,8 @@ func (p *Provider) startWatchingClusterAsync(c *cluster.Cluster) {
 }
 
 func (p *Provider) startWatchingCluster(timeout time.Duration) error {
+	plog.Info("Replaced")
+
 	selector := fmt.Sprintf("%s=%s", LabelCluster, p.clusterName)
 	if p.watching {
 		plog.Info(fmt.Sprintf("Pods for %s are being watched already", selector))
@@ -227,6 +229,7 @@ func (p *Provider) startWatchingCluster(timeout time.Duration) error {
 		watcher, err := p.client.CoreV1().Pods(p.retrieveNamespace()).Watch(ctx, metav1.ListOptions{LabelSelector: selector, Watch: true, TimeoutSeconds: &watchTimeoutSeconds})
 		if err != nil {
 			watcherr = fmt.Errorf("unable to watch the cluster status: %w", err)
+			plog.Info(fmt.Sprintf("Occurred watch err %+v", watcherr))
 			return
 		}
 
