@@ -94,6 +94,7 @@ func (p *Provider) init(c *cluster.Cluster) error {
 	p.id = strings.Replace(uuid.New().String(), "-", "", -1)
 	p.knownKinds = c.GetClusterKinds()
 	p.clusterName = c.Config.Name
+	p.clusterPods = map[types.UID]*v1.Pod{}
 	p.host = host
 	p.port = port
 	p.address = fmt.Sprintf("%s:%d", host, port)
