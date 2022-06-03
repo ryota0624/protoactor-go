@@ -46,6 +46,7 @@ func (kcm *k8sClusterMonitorActor) init(ctx actor.Context) {
 			plog.Info("Deregistered service from k8s")
 		}
 	case *StartWatchingCluster:
+	        ctx.SetReceiveTimeout(300 * time.Second)	
 		if err := kcm.startWatchingCluster(ctx.ReceiveTimeout()); err != nil {
 			plog.Error("Failed to start watching k8s cluster, will retry", log.Error(err))
 			ctx.Send(ctx.Self(), r)
