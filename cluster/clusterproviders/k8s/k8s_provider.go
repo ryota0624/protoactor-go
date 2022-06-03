@@ -223,7 +223,6 @@ func (p *Provider) startWatchingCluster(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	
-	var watcherr error
 	watcher, err := p.client.CoreV1().Pods(p.retrieveNamespace()).Watch(ctx, metav1.ListOptions{LabelSelector: selector, Watch: true, TimeoutSeconds: &watchTimeoutSeconds})
 	if err != nil {
 		watcherr = fmt.Errorf("unable to watch the cluster status: %w", err)
