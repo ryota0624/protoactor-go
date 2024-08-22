@@ -341,7 +341,7 @@ func (g *Gossiper) GetActorCount() map[string]int64 {
 	clusterKinds := g.cluster.GetClusterKinds()
 	for _, kindName := range clusterKinds {
 		kind := g.cluster.GetClusterKind(kindName)
-		m[kindName] = int64(kind.count)
+		m[kindName] = int64(kind.Count())
 	}
 	g.cluster.Logger().Debug("Actor Count", slog.Any("count", m))
 
