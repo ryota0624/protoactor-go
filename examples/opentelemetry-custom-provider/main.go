@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"log"
 	"time"
 
@@ -46,6 +47,7 @@ func main() {
 		}
 	}()
 
+	otel.SetMeterProvider(meterProvider)
 	config := actor.Configure(actor.WithMetricProviders(meterProvider))
 	system := actor.NewActorSystemWithConfig(config)
 	props := actor.PropsFromProducer(func() actor.Actor {
