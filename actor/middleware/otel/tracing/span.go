@@ -67,3 +67,8 @@ func setSpanContextToEnvelope(spanCtx trace.SpanContext, envelope *actor.Message
 	envelope.SetHeader("tracestate", spanCtx.TraceState().String())
 	envelope.SetHeader("trace-flags", fmt.Sprintf("%02x", byte(spanCtx.TraceFlags())))
 }
+
+// TraceableRootContext creates a RootContext with tracing capabilities
+func TraceableRootContext(rootContext actor.RootContext, spanContext trace.SpanContext) *actor.RootContext {
+	return rootContext.Copy().WithSenderMiddleware(RootContextSenderMiddleware()).WithSpawnMiddleware(RootContextSpawnMiddleware()).WithHeaders(MapFromSpanContext(spanContext))
+}
