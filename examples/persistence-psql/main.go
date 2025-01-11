@@ -362,8 +362,9 @@ func main() {
 		log.Printf("failed to parse connection string: %s", err)
 		return
 	}
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	system := actor.NewActorSystem()
-	provider := postgresql.NewProvider(config, system)
+	provider := postgresql.NewProvider(pool, system)
 
 	rootContext := system.Root
 	props := actor.PropsFromProducer(func() actor.Actor { return &Actor{} },
