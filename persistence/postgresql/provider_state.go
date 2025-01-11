@@ -133,7 +133,7 @@ func (s *ProviderState) GetSnapshotInterval() int {
 var _ persistence.ProviderState = &ProviderState{}
 
 type snapshotsTableRow struct {
-	Id            string
+	ActorName     string
 	Snapshot      []byte
 	SnapshotIndex int
 	MessageType   string

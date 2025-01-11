@@ -10,7 +10,11 @@ import (
 
 type Provider struct {
 	connConfig  *pgxpool.Config
-	actorSystem actor.ActorSystem
+	actorSystem *actor.ActorSystem
+}
+
+func NewProvider(connConfig *pgxpool.Config, actorSystem *actor.ActorSystem) *Provider {
+	return &Provider{connConfig: connConfig, actorSystem: actorSystem}
 }
 
 func (p *Provider) GetState() persistence.ProviderState {
