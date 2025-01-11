@@ -27,7 +27,8 @@ func NewProviderState(conn *pgxpool.Pool, logger *slog.Logger) *ProviderState {
 
 func (s *ProviderState) GetSnapshot(actorName string) (snapshot interface{}, eventIndex int, ok bool) {
 	rows, err := s.connPool.Query(context2.Background(),
-		"SELECT snapshot, message_type, snapshot_index FROM snapshots WHERE actor_name = $1 ORDER BY snapshot_index DESC LIMIT 1")
+		"SELECT actor_name, snapshot, message_type, snapshot_index FROM snapshots WHERE actor_name = $1 ORDER BY snapshot_index DESC LIMIT 1", actorName,
+	)
 	if err != nil {
 		s.logger.Error("Error getting snapshot", slog.Any("error", err))
 		return nil, 0, false
@@ -57,7 +58,11 @@ func (s *ProviderState) PersistSnapshot(actorName string, snapshotIndex int, sna
 		return
 	}
 	_, err = s.connPool.Exec(context2.Background(),
-		"INSERT INTO snapshots (id, snapshot, message_type, snapshot_index) VALUES ($1, $2, $3, $4)",
+		`
+INSERT INTO snapshots (actor_name, snapshot, message_type, snapshot_index) 
+	VALUES ($1, $2, $3, $4)
+  ON CONFLICT ON CONSTRAINT snapshots_pk DO UPDATE SET snapshot=$2, message_type=$3, snapshot_index=$4;
+`,
 		actorName, bytes, proto.MessageName(snapshot), snapshotIndex)
 	if err != nil {
 		s.logger.Error("Error persisting snapshot", slog.Any("error", err))
@@ -75,7 +80,7 @@ func (s *ProviderState) DeleteSnapshots(actorName string, inclusiveToIndex int) 
 
 func (s *ProviderState) GetEvents(actorName string, eventIndexStart int, eventIndexEnd int, callback func(e interface{})) {
 	rows, err := s.connPool.Query(context2.Background(),
-		"SELECT event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3",
+		"SELECT actor_name, event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3",
 		actorName, eventIndexStart, eventIndexEnd)
 	if err != nil {
 		s.logger.Error("Error getting events", slog.Any("error", err))
@@ -133,17 +138,17 @@ func (s *ProviderState) GetSnapshotInterval() int {
 var _ persistence.ProviderState = &ProviderState{}
 
 type snapshotsTableRow struct {
-	ActorName     string
-	Snapshot      []byte
-	SnapshotIndex int
-	MessageType   string
+	ActorName     string `db:"actor_name"`
+	Snapshot      []byte `db:"snapshot"`
+	SnapshotIndex int    `db:"snapshot_index"`
+	MessageType   string `db:"message_type"`
 }
 
 type journalEventsTableRow struct {
-	ActorName   string
-	Event       []byte
-	EventIndex  int
-	MessageType string
+	ActorName   string `db:"actor_name"`
+	Event       []byte `db:"event"`
+	EventIndex  int    `db:"event_index"`
+	MessageType string `db:"message_type"`
 }
 
 func unmarshalProtoMessage(bytes []byte, messageTypeName string) (proto.Message, error) {

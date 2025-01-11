@@ -4,5 +4,5 @@ create table if not exists snapshots
     snapshot_index bigint       not null,
     snapshot       json         not null,
     message_type   varchar(255) not null,
-    primary key (actor_name)
+    constraint snapshots_pk primary key (actor_name)
 );
