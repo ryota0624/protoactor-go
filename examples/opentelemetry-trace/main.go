@@ -34,6 +34,7 @@ func main() {
 	traceProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceConsoleExporter),
 	)
+
 	defer func() {
 		err := traceProvider.Shutdown(context2.Background())
 		if err != nil {
@@ -47,11 +48,11 @@ func main() {
 	props := actor.PropsFromProducer(func() actor.Actor {
 		return &helloActor{}
 	})
-
+	root := tracing.TraceableRootContext(system.Root)
 	otel.SetTracerProvider(traceProvider)
 
-	pid := system.Root.Spawn(props)
-	system.Root.Request(pid, &hello{Who: "with tracing"})
+	pid := root.Spawn(props)
+	root.Request(pid, &hello{Who: "with tracing"})
 	time.Sleep(100 * time.Millisecond)
 	_, _ = console.ReadLine()
 }

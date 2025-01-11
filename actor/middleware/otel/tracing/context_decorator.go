@@ -21,7 +21,7 @@ type ActorContext struct {
 var _ actor.Context = (*ActorContext)(nil)
 
 func (ac *ActorContext) Receive(envelope *actor.MessageEnvelope) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		ac.Context.Receive(envelope)
@@ -69,7 +69,7 @@ func (ac *ActorContext) Receive(envelope *actor.MessageEnvelope) {
 }
 
 func (ac *ActorContext) Send(pid *actor.PID, message interface{}) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		ac.Context.Send(pid, message)
@@ -84,7 +84,7 @@ func (ac *ActorContext) Send(pid *actor.PID, message interface{}) {
 }
 
 func (ac *ActorContext) Request(pid *actor.PID, message interface{}) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		ac.Context.Request(pid, message)
@@ -99,7 +99,7 @@ func (ac *ActorContext) Request(pid *actor.PID, message interface{}) {
 }
 
 func (ac *ActorContext) RequestWithCustomSender(pid *actor.PID, message interface{}, sender *actor.PID) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		ac.Context.RequestWithCustomSender(pid, message, sender)
@@ -126,7 +126,7 @@ func messageToEnvelop(message interface{}, t *ActorContext, sender *actor.PID) *
 }
 
 func (ac *ActorContext) RequestFuture(pid *actor.PID, message interface{}, timeout time.Duration) *actor.Future {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		return ac.Context.RequestFuture(pid, message, timeout)
@@ -142,7 +142,7 @@ func (ac *ActorContext) RequestFuture(pid *actor.PID, message interface{}, timeo
 
 }
 func (ac *ActorContext) Respond(response interface{}) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		ac.Context.Respond(response)
@@ -165,7 +165,7 @@ func ContextDecorator() func(next actor.ContextDecoratorFunc) actor.ContextDecor
 }
 
 func (ac *ActorContext) Spawn(props *actor.Props) *actor.PID {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		return ac.Context.Spawn(props)
@@ -180,7 +180,7 @@ func (ac *ActorContext) Spawn(props *actor.Props) *actor.PID {
 }
 
 func (ac *ActorContext) SpawnPrefix(props *actor.Props, prefix string) *actor.PID {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		return ac.Context.SpawnPrefix(props, prefix)
@@ -197,7 +197,7 @@ func (ac *ActorContext) SpawnPrefix(props *actor.Props, prefix string) *actor.PI
 }
 
 func (ac *ActorContext) SpawnNamed(props *actor.Props, id string) (*actor.PID, error) {
-	traceExt, ok := ac.ActorSystem().Extensions.Get(extensionID).(*TraceExtension)
+	traceExt, ok := ExtensionFromActorSystem(ac.ActorSystem())
 	if !ok {
 		ac.Logger().Debug("TraceExtension not registered")
 		return ac.Context.SpawnNamed(props, id)

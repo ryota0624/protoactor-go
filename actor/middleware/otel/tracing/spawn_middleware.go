@@ -14,6 +14,13 @@ import (
 func rootContextSpawnMiddleware() actor.SpawnMiddleware {
 	return func(next actor.SpawnFunc) actor.SpawnFunc {
 		return func(actorSystem *actor.ActorSystem, id string, props *actor.Props, parentContext actor.SpawnerContext) (pid *actor.PID, e error) {
+			traceExt, ok := ExtensionFromActorSystem(actorSystem)
+			if !ok {
+				actorSystem.Logger().Debug("TraceExtension not registered")
+				pid, err := next(actorSystem, id, props, parentContext)
+				return pid, err
+			}
+
 			rootContext, ok := parentContext.(*actor.RootContext)
 			if !ok {
 				parentContext.Logger().Debug("Context is not rootContext", slog.Any("self", parentContext.Self()))
@@ -34,7 +41,7 @@ func rootContextSpawnMiddleware() actor.SpawnMiddleware {
 					ctxWithParentSpan = trace.ContextWithSpanContext(ctxWithParentSpan, spanCtx)
 				}
 			}
-			traceExt := actorSystem.Extensions.Get(extensionID).(*TraceExtension)
+
 			_, span := traceExt.Tracer().Start(ctxWithParentSpan, fmt.Sprintf("spawn/%s", id))
 			defer span.End()
 			span.SetAttributes(attribute.String("SpawnActorPID", pid.String()))
