@@ -311,6 +311,10 @@ func (a *Actor) Receive(ctx actor.Context) {
 		}
 		a.state = msg.state
 		log.Printf("%s, internal state changed to '%v'\n", scenario, a.state)
+		if ctx.Sender() != nil {
+			ctx.Respond(&Message{state: fmt.Sprintf("response to message: %s", msg.state)})
+		}
+
 	case *postgresql.PersistenceErrorOccurred:
 		log.Printf("PersistenceErrorOccurred: %s", msg.PersistenceError)
 	}

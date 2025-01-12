@@ -38,7 +38,6 @@ func (mixin *Mixin) Name() string {
 func (mixin *Mixin) PersistReceive(message proto.Message) {
 	mixin.providerState.PersistEvent(mixin.Name(), mixin.eventIndex, message)
 	if mixin.eventIndex%mixin.providerState.GetSnapshotInterval() == 0 {
-		/// TODO: system messageに突っ込みたい
 		mixin.sender.Send(mixin.self, &RequestSnapshot{})
 	}
 	mixin.eventIndex++
