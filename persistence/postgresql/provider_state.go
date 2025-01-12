@@ -15,6 +15,27 @@ import (
 	"sync"
 )
 
+type PersistenceError struct {
+	Cause error
+}
+
+func (e *PersistenceError) Error() string {
+	return fmt.Sprintf("persistence error: %v", e.Cause)
+}
+
+func (e *PersistenceError) Unwrap() error {
+	return e.Cause
+}
+
+func newPersistenceError(err error) *PersistenceError {
+	return &PersistenceError{Cause: err}
+}
+
+func IsPersistenceError(err error) bool {
+	_, ok := err.(*PersistenceError)
+	return ok
+}
+
 type ProviderState struct {
 	connPool *pgxpool.Pool
 	logger   *slog.Logger
@@ -54,8 +75,7 @@ func (s *ProviderState) PersistSnapshot(actorName string, snapshotIndex int, sna
 	defer s.wg.Done()
 	bytes, err := json.Marshal(snapshot)
 	if err != nil {
-		s.logger.Error("Error marshalling snapshot", slog.Any("error", err))
-		return
+		panic(newPersistenceError(fmt.Errorf("error marshalling snapshot: %w", err)))
 	}
 	_, err = s.connPool.Exec(context2.Background(),
 		`
@@ -65,7 +85,7 @@ INSERT INTO snapshots (actor_name, snapshot, message_type, snapshot_index)
 `,
 		actorName, bytes, proto.MessageName(snapshot), snapshotIndex)
 	if err != nil {
-		s.logger.Error("Error persisting snapshot", slog.Any("error", err))
+		panic(newPersistenceError(fmt.Errorf("error persisting snapshot: %w", err)))
 	}
 }
 
@@ -79,8 +99,11 @@ func (s *ProviderState) DeleteSnapshots(actorName string, inclusiveToIndex int) 
 }
 
 func (s *ProviderState) GetEvents(actorName string, eventIndexStart int, eventIndexEnd int, callback func(e interface{})) {
+	if eventIndexEnd == 0 {
+		eventIndexEnd = 9999
+	}
 	rows, err := s.connPool.Query(context2.Background(),
-		"SELECT actor_name, event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3",
+		"SELECT actor_name, event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3 ORDER BY event_index",
 		actorName, eventIndexStart, eventIndexEnd)
 	if err != nil {
 		s.logger.Error("Error getting events", slog.Any("error", err))
@@ -88,13 +111,13 @@ func (s *ProviderState) GetEvents(actorName string, eventIndexStart int, eventIn
 	}
 	eventRows, err := pgx.CollectRows(rows, pgx.RowToStructByName[journalEventsTableRow])
 	events := make([]proto.Message, len(eventRows))
-	for _, row := range eventRows {
+	for i, row := range eventRows {
 		event, err := unmarshalProtoMessage(row.Event, row.MessageType)
 		if err != nil {
 			s.logger.Error("Error unmarshalling event", slog.Any("error", err))
 			return
 		}
-		events[row.EventIndex] = event
+		events[i] = event
 	}
 
 	for _, event := range events {
@@ -107,14 +130,13 @@ func (s *ProviderState) PersistEvent(actorName string, eventIndex int, event pro
 	defer s.wg.Done()
 	bytes, err := json.Marshal(event)
 	if err != nil {
-		s.logger.Error("Error marshalling event", slog.Any("error", err))
-		return
+		panic(newPersistenceError(fmt.Errorf("error marshalling event: %w", err)))
 	}
 	_, err = s.connPool.Exec(context2.Background(),
 		"INSERT INTO event_journals (actor_name, event, message_type, event_index) VALUES ($1, $2, $3, $4)",
 		actorName, bytes, proto.MessageName(event), eventIndex)
 	if err != nil {
-		s.logger.Error("Error persisting event", slog.Any("error", err))
+		panic(newPersistenceError(fmt.Errorf("error persisting event: %w", err)))
 	}
 }
 

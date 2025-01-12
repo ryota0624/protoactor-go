@@ -250,7 +250,6 @@ func (s *Snapshot) WhichOneof(protoreflect.OneofDescriptor) protoreflect.FieldDe
 
 func (s *Snapshot) GetUnknown() protoreflect.RawFields { return nil }
 
-// func (m *message) SetUnknown(protoreflect.RawFields)  { return }
 func (s *Snapshot) SetUnknown(protoreflect.RawFields) {}
 
 func (s *Snapshot) IsValid() bool {
@@ -312,6 +311,8 @@ func (a *Actor) Receive(ctx actor.Context) {
 		}
 		a.state = msg.state
 		log.Printf("%s, internal state changed to '%v'\n", scenario, a.state)
+	case *postgresql.PersistenceErrorOccurred:
+		log.Printf("PersistenceErrorOccurred: %s", msg.PersistenceError)
 	}
 }
 
@@ -368,10 +369,15 @@ func main() {
 
 	rootContext := system.Root
 	props := actor.PropsFromProducer(func() actor.Actor { return &Actor{} },
-		actor.WithReceiverMiddleware(persistence.Using(provider)))
+		actor.WithReceiverMiddleware(postgresql.HandlePersistenceError(), persistence.Using(provider)))
 	pid, _ := rootContext.SpawnNamed(props, "persistent")
 	rootContext.Send(pid, &Message{state: "state4"})
 	rootContext.Send(pid, &Message{state: "state5"})
+	if result, err := rootContext.RequestFuture(pid, &Message{state: "state6"}, time.Second*1).Result(); err != nil {
+		fmt.Printf("request error err=%v\n", err)
+	} else {
+		fmt.Printf("response=%v\n", result)
+	}
 
 	rootContext.PoisonFuture(pid).Wait()
 	fmt.Printf("*** restart ***\n")

@@ -1,4 +1,4 @@
-module persistence-psql
+module persistence-postgresql
 
 go 1.22
 
