@@ -2,30 +2,43 @@ package main
 
 import (
 	"fmt"
+	console "github.com/asynkron/goconsole"
+	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
 
 	"cluster-identitylookup-postgresql/shared"
 
-	console "github.com/asynkron/goconsole"
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
-	"github.com/asynkron/protoactor-go/cluster/clusterproviders/consul"
 	"github.com/asynkron/protoactor-go/remote"
 )
 
 func main() {
-	cluster := startNode()
-
+	cluster, clean := startNode()
+	defer clean()
+	pid := cluster.Get("abc", "hello")
+	fmt.Printf("Got pid %v\n", pid)
+	res, _ := cluster.Request("abc", "hello", &shared.HelloRequest{Name: "Roger"})
+	fmt.Printf("Got response %v\n", res)
 	fmt.Print("\nBoot other nodes and press Enter\n")
-	console.ReadLine()
+	for {
+		st, _ := console.ReadLine()
+		if st == "exit" {
+			break
+		}
+		pid := cluster.Get("abc", "hello")
+		fmt.Printf("Got pid %v", pid)
+		res, _ := cluster.Request("abc", "hello", &shared.HelloRequest{Name: "Roger"})
+		fmt.Printf("Got response %v", res)
+	}
 
 	cluster.Shutdown(true)
 }
 
-func startNode() *cluster.Cluster {
+func startNode() (*cluster.Cluster, func()) {
 	system := actor.NewActorSystem()
 
-	provider, _ := consul.New()
-	lookup := shared.NewLockUp()
+	provider := automanaged.New()
+	lookup, clean := shared.NewLockUp(system)
 	config := remote.Configure("localhost", 0)
 
 	props := actor.PropsFromFunc(func(ctx actor.Context) {
@@ -42,5 +55,6 @@ func startNode() *cluster.Cluster {
 	c := cluster.New(system, clusterConfig)
 
 	c.StartMember()
-	return c
+
+	return c, clean
 }

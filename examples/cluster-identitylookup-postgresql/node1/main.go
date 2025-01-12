@@ -6,12 +6,13 @@ import (
 	console "github.com/asynkron/goconsole"
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
-	"github.com/asynkron/protoactor-go/cluster/clusterproviders/consul"
+	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
 	"github.com/asynkron/protoactor-go/remote"
 )
 
 func main() {
-	c := startNode()
+	c, clean := startNode()
+	defer clean()
 
 	fmt.Print("\nBoot other nodes and press Enter\n")
 	console.ReadLine()
@@ -25,15 +26,15 @@ func main() {
 	c.Shutdown(true)
 }
 
-func startNode() *cluster.Cluster {
+func startNode() (*cluster.Cluster, func()) {
 	system := actor.NewActorSystem()
 
-	provider, _ := consul.New()
-	lookup := shared.NewLockUp()
+	provider := automanaged.New()
+	lookup, clean := shared.NewLockUp(system)
 	config := remote.Configure("localhost", 0)
 	clusterConfig := cluster.Configure("my-cluster", provider, lookup, config)
 	c := cluster.New(system, clusterConfig)
 	c.StartMember()
 
-	return c
+	return c, clean
 }

@@ -22,6 +22,7 @@ func newIdentityStoragePlacementActor(cluster *Cluster, identityStorageLookup *I
 	this := &IdentityStoragePlacementActor{
 		cluster:               cluster,
 		identityStorageLookup: identityStorageLookup,
+		actors:                make(map[string] /* clusterIdentity*/ GrainMeta),
 	}
 	return this
 }
@@ -65,7 +66,7 @@ func (i *IdentityStoragePlacementActor) onActivationTerminating(_ actor.Context,
 		i.cluster.PidCache.Remove(msg.ClusterIdentity.Identity, msg.ClusterIdentity.Kind)
 		i.identityStorageLookup.Storage.RemoveActivation(newSpawnLock(grainMeta.PID.String(), msg.ClusterIdentity))
 	} else {
-		i.cluster.Logger().Error("activation not found", slog.Any("clusterIdentity", msg.ClusterIdentity))
+		i.cluster.Logger().Error("IdentityStoragePlacementActor#onActivationTerminating activation not found", slog.Any("clusterIdentity", msg.ClusterIdentity))
 	}
 }
 
@@ -91,7 +92,7 @@ func (i *IdentityStoragePlacementActor) spawn(req *ActivationRequest, ctx actor.
 	kind.Inc()
 
 	/// TODO: member selectionを考慮
-	i.identityStorageLookup.Storage.StoreActivation(i.cluster.ActorSystem.ID, newSpawnLock(pid.String(), req.ClusterIdentity), pid)
+	i.identityStorageLookup.Storage.StoreActivation(i.cluster.ActorSystem.ID, newSpawnLock(req.RequestId, req.ClusterIdentity), pid)
 	i.actors[req.ClusterIdentity.AsKey()] = GrainMeta{
 		ID:  req.ClusterIdentity,
 		PID: pid,

@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"github.com/lithammer/shortuuid/v4"
+	"log/slog"
 	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
@@ -51,10 +53,13 @@ func (i *IdentityStorageLookup) Get(clusterIdentity *ClusterIdentity) *actor.PID
 	msg := newGetPid(clusterIdentity)
 	timeout := 5 * time.Second
 
-	res, _ := i.system.Root.RequestFuture(i.worker, msg, timeout).Result()
-	response := res.(*actor.Future)
-
-	return response.PID()
+	res, err := i.system.Root.RequestFuture(i.worker, msg, timeout).Result()
+	if err != nil {
+		i.system.Logger().Error("Failed to get pid", slog.Any("error", err))
+		return nil
+	}
+	response := res.(*PidResult)
+	return response.Pid
 }
 
 func (i *IdentityStorageLookup) RemovePid(clusterIdentity *ClusterIdentity, pid *actor.PID) {
@@ -62,7 +67,7 @@ func (i *IdentityStorageLookup) RemovePid(clusterIdentity *ClusterIdentity, pid 
 		return
 	}
 
-	i.Storage.RemoveActivation(newSpawnLock(pid.String(), clusterIdentity))
+	i.Storage.RemoveActivation(newSpawnLock(shortuuid.New(), clusterIdentity))
 }
 
 func (i *IdentityStorageLookup) Shutdown() {

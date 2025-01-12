@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"time"
@@ -27,7 +28,7 @@ func newIdentityStorageWorker(storageLookup *IdentityStorageLookup) *IdentitySto
 // Receive func
 func (ids *IdentityStorageWorker) Receive(c actor.Context) {
 	m := c.Message()
-	getPid, ok := m.(GetPid)
+	getPid, ok := m.(*GetPid)
 
 	if !ok {
 		return
@@ -41,7 +42,7 @@ func (ids *IdentityStorageWorker) Receive(c actor.Context) {
 	existing, _ := ids.cluster.PidCache.Get(getPid.ClusterIdentity.Identity, getPid.ClusterIdentity.Kind)
 
 	if existing != nil {
-		log.Printf("Found %s in pidcache", m.(GetPid).ClusterIdentity.ToShortString())
+		log.Printf("Found %s in pidcache", m.(*GetPid).ClusterIdentity.ToShortString())
 		c.Respond(newPidResult(existing))
 	}
 
@@ -50,7 +51,7 @@ func (ids *IdentityStorageWorker) Receive(c actor.Context) {
 		pid := &actor.PID{}
 		err := json.Unmarshal([]byte(activation.Pid), pid)
 		if err != nil {
-			panic(err)
+			panic(fmt.Errorf("IdentityStorageWorker: Failed to unmarshal pid: %v", err))
 		}
 		if ids.cluster.MemberList.ContainsMemberID(activation.MemberID) {
 			ids.cluster.PidCache.Set(getPid.ClusterIdentity.Identity, getPid.ClusterIdentity.Kind, pid)
@@ -63,7 +64,7 @@ func (ids *IdentityStorageWorker) Receive(c actor.Context) {
 		}
 	}
 
-	activator := ids.cluster.MemberList.GetActivatorMember(getPid.ClusterIdentity.Identity, getPid.ClusterIdentity.Kind)
+	activator := ids.cluster.MemberList.GetActivatorMember(getPid.ClusterIdentity.Kind, getPid.ClusterIdentity.Identity)
 
 	if activator == "" {
 		c.Respond(newPidResult(nil))
@@ -109,7 +110,7 @@ func (ids *IdentityStorageWorker) SpawnActivation(activatorAddress string, lock 
 		RequestId:       lock.LockID,
 	}
 
-	activationResult, err := ids.cluster.ActorSystem.Root.RequestFuture(remotePid, activateRequest, 5*time.Second).Result()
+	activationResult, err := ids.cluster.ActorSystem.Root.RequestFuture(remotePid, activateRequest, 10*time.Second).Result()
 	if err != nil {
 		ids.cluster.Logger().Error("Failed to activate", slog.Any("error", err))
 		return nil
