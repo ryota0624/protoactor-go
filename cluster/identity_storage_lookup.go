@@ -25,7 +25,7 @@ type IdentityStorageLookup struct {
 
 var _ IdentityLookup = (*IdentityStorageLookup)(nil)
 
-func newIdentityStorageLookup(storage StorageLookup) *IdentityStorageLookup {
+func NewIdentityStorageLookup(storage StorageLookup) *IdentityStorageLookup {
 	this := &IdentityStorageLookup{
 		Storage: storage,
 	}
@@ -58,7 +58,6 @@ func (i *IdentityStorageLookup) Get(clusterIdentity *ClusterIdentity) *actor.PID
 }
 
 func (i *IdentityStorageLookup) RemovePid(clusterIdentity *ClusterIdentity, pid *actor.PID) {
-	/// workerにremovePidを送る
 	if i.system.IsStopped() {
 		return
 	}
@@ -73,13 +72,14 @@ func (i *IdentityStorageLookup) Shutdown() {
 	}
 
 	i.RemoveMember(i.memberID)
-	/// workerもshutdownする
+	i.system.Root.Stop(i.worker)
 }
 
-func (i *IdentityStorageLookup) Setup(cluster *Cluster, kinds []string, isClient bool) {
+func (i *IdentityStorageLookup) Setup(cluster *Cluster, _ []string, isClient bool) {
 	i.cluster = cluster
 	i.system = cluster.ActorSystem
 	i.memberID = cluster.ActorSystem.ID
+	i.isClient = isClient
 
 	workerProps := actor.PropsFromProducer(func() actor.Actor { return newIdentityStorageWorker(i) })
 	var err error
@@ -101,6 +101,8 @@ func (i *IdentityStorageLookup) Setup(cluster *Cluster, kinds []string, isClient
 		return
 	}
 
-	//var props = Props.FromProducer(() => new IdentityStoragePlacementActor(Cluster, this));
-	//_placementActor = _system.Root.SpawnNamedSystem(props, PlacementActorName);
+	i.placementActor, err = i.system.Root.SpawnNamed(actor.PropsFromProducer(func() actor.Actor { return newIdentityStoragePlacementActor(cluster, i) }), placementActorName)
+	if err != nil {
+		panic(err)
+	}
 }
