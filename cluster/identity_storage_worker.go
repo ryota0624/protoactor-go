@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"encoding/json"
+
 	"log"
 
 	"github.com/asynkron/protoactor-go/actor"
@@ -42,6 +44,20 @@ func (ids *IdentityStorageWorker) Receive(c actor.Context) {
 		c.Respond(newPidResult(existing))
 	}
 
+	activation := ids.storage.TryGetExistingActivation(getPid.ClusterIdentity)
+	if activation != nil {
+		pid := &actor.PID{}
+		go func() {
+			err := json.Unmarshal([]byte(activation.Pid), pid)
+			if err != nil {
+				panic(err)
+			}
+			ids.cluster.PidCache.Set(getPid.ClusterIdentity.Identity, getPid.ClusterIdentity.Kind, pid)
+		}()
+
+		c.Respond(newPidResult(pid))
+		return
+	}
+
 	return
-	// continue
 }
