@@ -62,7 +62,7 @@ func newActivationWaitingActor(pool *pgxpool.Pool, poolingQueryInterval time.Dur
 		logger: logger.With(
 			slog.String("actorType", "ActivationWaitingActor"),
 		),
-		maxQueryRetryPerWaiting: 20,
+		maxQueryRetryPerWaiting: 3,
 	}
 	return this
 }

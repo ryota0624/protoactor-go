@@ -63,7 +63,7 @@ func (i *IdentityStorageLookup) Get(clusterIdentity *ClusterIdentity) *actor.PID
 	return response.Pid
 }
 
-func (i *IdentityStorageLookup) RemovePid(clusterIdentity *ClusterIdentity, pid *actor.PID) {
+func (i *IdentityStorageLookup) RemovePid(clusterIdentity *ClusterIdentity, _ *actor.PID) {
 	if i.system.IsStopped() {
 		return
 	}

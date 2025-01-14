@@ -83,6 +83,10 @@ func startNode(autoManagePort int) (*cluster.Cluster, func()) {
 		switch msg := ctx.Message().(type) {
 		case *actor.Started:
 			fmt.Printf("Started %v", msg)
+			go func() {
+				time.Sleep(time.Second * 15)
+				ctx.Stop(ctx.Self())
+			}()
 		case *shared.HelloRequest:
 			fmt.Printf("Hello %v\n", msg.Name)
 			ctx.Respond(&shared.HelloResponse{})

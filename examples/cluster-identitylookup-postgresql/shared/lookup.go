@@ -5,6 +5,7 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/asynkron/protoactor-go/cluster/identitylookup/postgresql"
+	"github.com/asynkron/protoactor-go/cluster/identitylookup/postgresql/ddl"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -52,7 +53,7 @@ func NewLockUp(actorSystem *actor.ActorSystem) (cluster.IdentityLookup, func()) 
 	if err := prepareTables(ctx, connString); err != nil {
 		panic(err)
 	}
-	postgresLookup := postgresql.NewStorageLookup(pool, actorSystem.Logger(), actorSystem.Root, time.Second*3)
+	postgresLookup := postgresql.NewStorageLookup(pool, actorSystem.Logger(), actorSystem.Root, time.Second*3, actorSystem.ID)
 	postgresLookup.Init()
 	return cluster.NewIdentityStorageLookup(postgresLookup), func() {
 		if err := testcontainers.TerminateContainer(postgresContainer); err != nil {
@@ -68,35 +69,8 @@ func prepareTables(ctx context.Context, connString string) error {
 	}
 
 	queries := []string{
-		`
-CREATE TABLE IF NOT EXISTS spawn_locks
-(
-    lock_id   TEXT NOT NULL,
-    identity  TEXT NOT NULL,
-    kind      TEXT NOT NULL,
-    locked_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    unlocked_at TIMESTAMP WITH TIME ZONE,
-    PRIMARY KEY (identity, kind)
-);
-
-`,
-		`
-CREATE TABLE IF NOT EXISTS activations
-(
-    identity     TEXT NOT NULL,
-    kind         TEXT NOT NULL,
-    identity_key TEXT NOT NULL,
-    member_id    TEXT NOT NULL,
-    pid 				 json NOT NULL,
-    lock_id      TEXT NOT NULL,
-    activated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    PRIMARY KEY (identity, kind)
---     FOREIGN KEY (lock_id) references spawn_locks (lock_id)
-);
-`,
-		`
-CREATE INDEX IF NOT EXISTS activations_member_idx ON activations (member_id);
-`,
+		ddl.ActivationsSql,
+		ddl.SpawnLocksSql,
 	}
 
 	for _, query := range queries {

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lithammer/shortuuid/v4"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -20,16 +21,18 @@ type StorageLookup struct {
 	waiting                     *actor.PID
 	rootContext                 *actor.RootContext
 	waitingForActivationTimeout time.Duration
+	memberId                    string
 }
 
 var _ cluster.StorageLookup = (*StorageLookup)(nil)
 
-func NewStorageLookup(pool *pgxpool.Pool, logger *slog.Logger, rootContext *actor.RootContext, waitingForActivationTimeout time.Duration) *StorageLookup {
+func NewStorageLookup(pool *pgxpool.Pool, logger *slog.Logger, rootContext *actor.RootContext, waitingForActivationTimeout time.Duration, memberId string) *StorageLookup {
 	return &StorageLookup{
 		pool:                        pool,
 		logger:                      logger.With(slog.String("component", "postgresql.StorageLookup"), slog.String("ActorSystemId", rootContext.ActorSystem().ID)),
 		rootContext:                 rootContext,
 		waitingForActivationTimeout: waitingForActivationTimeout,
+		memberId:                    memberId,
 	}
 }
 
@@ -50,7 +53,12 @@ func (s *StorageLookup) Shutdown() *cluster.ClusterIdentity {
 }
 
 func (s *StorageLookup) TryGetExistingActivation(clusterIdentity *cluster.ClusterIdentity) *cluster.StoredActivation {
-	row, err := s.pool.Query(context2.Background(), "SELECT * FROM activations WHERE identity = $1 AND kind = $2", clusterIdentity.Identity, clusterIdentity.Kind)
+	row, err := s.pool.Query(
+		context2.Background(),
+		"SELECT * FROM activations WHERE identity = $1 AND kind = $2",
+		clusterIdentity.Identity,
+		clusterIdentity.Kind,
+	)
 	if err != nil {
 		s.logger.Error("error while querying for activation", slog.Any("error", err))
 		return nil
@@ -61,7 +69,10 @@ func (s *StorageLookup) TryGetExistingActivation(clusterIdentity *cluster.Cluste
 			MemberID: row.MemberId,
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
-		s.logger.Info("activation not found", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
+		s.logger.Info("activation not found",
+			slog.Any("identity", clusterIdentity.Identity),
+			slog.Any("kind", clusterIdentity.Kind),
+		)
 		return nil
 	} else {
 		s.logger.Error("error while collecting row", slog.Any("error", err))
@@ -72,33 +83,34 @@ func (s *StorageLookup) TryGetExistingActivation(clusterIdentity *cluster.Cluste
 
 func (s *StorageLookup) TryAcquireLock(clusterIdentity *cluster.ClusterIdentity) *cluster.SpawnLock {
 	lockId := shortuuid.New()
-	/// Lockのとりっぱなし防止のための削除を考える
 
-	activation := s.TryGetExistingActivation(clusterIdentity)
-	if activation != nil {
-		s.logger.Info("activation already exists", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
-		return nil
-	}
-
-	/// ロックが解除(Remove)されていてもロックから1minはロックは取れない
-	/// ロックが解除されていなくてもロックから1hour経過しているならロックは取れる
 	effect, err := s.pool.Exec(context2.Background(), `
-INSERT INTO spawn_locks (lock_id, identity, kind)
-VALUES ($1, $2, $3)
-ON CONFLICT (identity, kind) DO UPDATE
-    SET lock_id = $1, locked_at = NOW(), unlocked_at = NULL
-WHERE (spawn_locks.unlocked_at IS NOT NULL AND spawn_locks.locked_at < NOW() - INTERVAL '1 minute')
-   OR (spawn_locks.unlocked_at IS NULL AND spawn_locks.locked_at < NOW() - INTERVAL '1 hour');
+INSERT INTO spawn_locks (lock_id, identity, kind, member_id)
+SELECT $1, $2, $3, $4
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM activations
+    WHERE activations.identity = $2
+      AND activations.kind = $3
+);
 `,
-		lockId, clusterIdentity.Identity, clusterIdentity.Kind,
+		lockId,
+		clusterIdentity.Identity,
+		clusterIdentity.Kind,
+		s.memberId,
 	)
+
 	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+			s.logger.Info("lock already exists with constraint failure", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
+			return nil
+		}
 		s.logger.Error("error while inserting lock", slog.Any("error", err))
 		return nil
 	}
 
 	if effect.RowsAffected() == 0 {
-		s.logger.Info("lock already exists", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
+		s.logger.Info("lock already exists activation exists yet", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
 		return nil
 	}
 
@@ -109,8 +121,14 @@ WHERE (spawn_locks.unlocked_at IS NOT NULL AND spawn_locks.locked_at < NOW() - I
 }
 
 func (s *StorageLookup) WaitForActivation(clusterIdentity *cluster.ClusterIdentity) *cluster.StoredActivation {
-	s.logger.Info("waiting for activation", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
-	res, err := s.rootContext.RequestFuture(s.waiting, &AddWaiting{clusterIdentity: clusterIdentity}, s.waitingForActivationTimeout).Result()
+	s.logger.Info("waiting for activation",
+		slog.Any("identity", clusterIdentity.Identity),
+		slog.Any("kind", clusterIdentity.Kind),
+	)
+	res, err := s.rootContext.RequestFuture(
+		s.waiting, &AddWaiting{clusterIdentity: clusterIdentity},
+		s.waitingForActivationTimeout,
+	).Result()
 	if err != nil {
 		s.logger.Error("error while waiting for activation", slog.Any("error", err))
 		return nil
@@ -133,16 +151,11 @@ func (s *StorageLookup) WaitForActivation(clusterIdentity *cluster.ClusterIdenti
 }
 
 func (s *StorageLookup) RemoveLock(spawnLock cluster.SpawnLock) {
-	_, err := s.pool.Exec(context2.Background(), "UPDATE spawn_locks SET unlocked_at = now() WHERE lock_id = $1", spawnLock.LockID)
-	if err != nil {
-		s.logger.Error("error while deleting lock", slog.Any("error", err))
-	}
-}
-
-func (s *StorageLookup) DeleteLock(spawnLock cluster.SpawnLock) {
 	_, err := s.pool.Exec(context2.Background(), "DELETE FROM spawn_locks WHERE lock_id = $1", spawnLock.LockID)
+	s.logger.Info("removing lock", slog.Any("lockId", spawnLock.LockID))
 	if err != nil {
 		s.logger.Error("error while deleting lock", slog.Any("error", err))
+		panic(fmt.Sprintf("error while deleting lock: %v", err))
 	}
 }
 
@@ -152,7 +165,16 @@ func (s *StorageLookup) StoreActivation(memberID string, spawnLock *cluster.Spaw
 		s.logger.Error("error while marshalling pid", slog.Any("error", err))
 		panic(err)
 	}
-	_, err = s.pool.Exec(context2.Background(), "INSERT INTO activations (identity, kind, identity_key, member_id, pid, lock_id) VALUES ($1, $2, $3, $4, $5, $6)", spawnLock.ClusterIdentity.Identity, spawnLock.ClusterIdentity.Kind, spawnLock.ClusterIdentity.AsKey(), memberID, pidJson, spawnLock.LockID)
+	_, err = s.pool.Exec(context2.Background(), `
+INSERT INTO activations (identity, kind, identity_key, member_id, pid, lock_id) VALUES ($1, $2, $3, $4, $5, $6)
+`,
+		spawnLock.ClusterIdentity.Identity,
+		spawnLock.ClusterIdentity.Kind,
+		spawnLock.ClusterIdentity.AsKey(),
+		memberID,
+		pidJson,
+		spawnLock.LockID,
+	)
 	if err != nil {
 		s.logger.Error("error while inserting activation", slog.Any("error", err))
 		panic(err)
@@ -160,9 +182,15 @@ func (s *StorageLookup) StoreActivation(memberID string, spawnLock *cluster.Spaw
 }
 
 func (s *StorageLookup) RemoveActivation(lock *cluster.SpawnLock) {
-	_, err := s.pool.Exec(context2.Background(), "DELETE FROM activations WHERE lock_id = $1", lock.LockID)
+	rows, err := s.pool.Query(context2.Background(), `DELETE FROM activations WHERE identity = $1 AND kind = $2 RETURNING *`, lock.ClusterIdentity.Identity, lock.ClusterIdentity.Kind)
 	if err != nil {
 		s.logger.Error("error while deleting activation", slog.Any("error", err))
+	}
+	s.logger.Info("removing activation", slog.Any("identity", lock.ClusterIdentity.Identity), slog.Any("kind", lock.ClusterIdentity.Kind))
+	deletedRow, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[ActivationsTableRow])
+	_, err = s.pool.Exec(context2.Background(), "DELETE FROM spawn_locks WHERE lock_id = $1", deletedRow.LockId)
+	if err != nil {
+		s.logger.Error("error while deleting spawn_locks", slog.Any("error", err))
 	}
 }
 
@@ -170,6 +198,11 @@ func (s *StorageLookup) RemoveMemberId(memberID string) {
 	_, err := s.pool.Exec(context2.Background(), "DELETE FROM activations WHERE member_id = $1", memberID)
 	if err != nil {
 		s.logger.Error("error while deleting activations", slog.Any("error", err))
+	}
+
+	_, err = s.pool.Exec(context2.Background(), "DELETE FROM spawn_locks WHERE member_id = $1", memberID)
+	if err != nil {
+		s.logger.Error("error while deleting spawn_locks", slog.Any("error", err))
 	}
 }
 
