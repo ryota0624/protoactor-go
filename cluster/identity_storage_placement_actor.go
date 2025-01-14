@@ -16,6 +16,7 @@ type IdentityStoragePlacementActor struct {
 	identityStorageLookup *IdentityStorageLookup
 	subscription          *eventstream.Subscription
 	actors                map[string] /* clusterIdentity*/ GrainMeta
+	logger                *slog.Logger
 }
 
 func newIdentityStoragePlacementActor(cluster *Cluster, identityStorageLookup *IdentityStorageLookup) *IdentityStoragePlacementActor {
@@ -23,6 +24,9 @@ func newIdentityStoragePlacementActor(cluster *Cluster, identityStorageLookup *I
 		cluster:               cluster,
 		identityStorageLookup: identityStorageLookup,
 		actors:                make(map[string] /* clusterIdentity*/ GrainMeta),
+		logger: cluster.Logger().With(
+			slog.String("actorType", "IdentityStoragePlacementActor"),
+		),
 	}
 	return this
 }
@@ -41,14 +45,15 @@ func (i *IdentityStoragePlacementActor) Receive(context actor.Context) {
 }
 
 func (i *IdentityStoragePlacementActor) onStarted(context actor.Context) {
-	i.cluster.Logger().Info("IdentityStoragePlacementActor started")
+	i.logger.Info("IdentityStoragePlacementActor started")
+	i.logger = i.logger.With(slog.String("pid", context.Self().Id))
 	i.subscription = i.cluster.ActorSystem.EventStream.Subscribe(func(evt interface{}) {
 		context.Send(context.Self(), evt)
 	})
 }
 
 func (i *IdentityStoragePlacementActor) onStopping(_ actor.Context) {
-	i.cluster.Logger().Info("IdentityStoragePlacementActor stopping")
+	i.logger.Info("IdentityStoragePlacementActor stopping")
 	i.subscription.Deactivate()
 	for _, meta := range i.actors {
 		/// TODO: need to throttle?
@@ -59,14 +64,14 @@ func (i *IdentityStoragePlacementActor) onStopping(_ actor.Context) {
 func (i *IdentityStoragePlacementActor) onActivationTerminating(_ actor.Context, msg *ActivationTerminating) {
 	if grainMeta, ok := i.actors[msg.ClusterIdentity.AsKey()]; ok {
 		if grainMeta.PID != msg.Pid {
-			i.cluster.Logger().Error("PID mismatch", slog.Any("clusterIdentity", msg.ClusterIdentity), slog.Any("expectedPid", grainMeta.PID), slog.Any("actualPid", msg.Pid))
+			i.logger.Error("PID mismatch", slog.Any("clusterIdentity", msg.ClusterIdentity), slog.Any("expectedPid", grainMeta.PID), slog.Any("actualPid", msg.Pid))
 			return
 		}
 		delete(i.actors, msg.ClusterIdentity.AsKey())
 		i.cluster.PidCache.Remove(msg.ClusterIdentity.Identity, msg.ClusterIdentity.Kind)
 		i.identityStorageLookup.Storage.RemoveActivation(newSpawnLock(grainMeta.PID.String(), msg.ClusterIdentity))
 	} else {
-		i.cluster.Logger().Error("IdentityStoragePlacementActor#onActivationTerminating activation not found", slog.Any("clusterIdentity", msg.ClusterIdentity))
+		i.logger.Error("IdentityStoragePlacementActor#onActivationTerminating activation not found", slog.Any("clusterIdentity", msg.ClusterIdentity))
 	}
 }
 
@@ -83,16 +88,17 @@ func (i *IdentityStoragePlacementActor) onActivationRequest(context actor.Contex
 		return
 	}
 
-	i.spawn(msg, context, clusterKind)
+	i.spawnActor(context, msg, clusterKind)
 }
 
-func (i *IdentityStoragePlacementActor) spawn(req *ActivationRequest, ctx actor.Context, kind *ActivatedKind) {
+func (i *IdentityStoragePlacementActor) spawnActor(ctx actor.Context, req *ActivationRequest, kind *ActivatedKind) {
 	props := WithClusterIdentity(kind.Props, req.ClusterIdentity)
 	pid := ctx.SpawnPrefix(props, req.ClusterIdentity.Identity)
 	kind.Inc()
 
 	/// TODO: member selectionを考慮
 	i.identityStorageLookup.Storage.StoreActivation(i.cluster.ActorSystem.ID, newSpawnLock(req.RequestId, req.ClusterIdentity), pid)
+	i.logger.Info("Activation Stored", slog.Any("pid", pid), slog.Any("clusterIdentity", req.ClusterIdentity), slog.String("key", req.ClusterIdentity.AsKey()))
 	i.actors[req.ClusterIdentity.AsKey()] = GrainMeta{
 		ID:  req.ClusterIdentity,
 		PID: pid,

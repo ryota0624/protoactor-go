@@ -4,13 +4,13 @@ import (
 	context2 "context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lithammer/shortuuid/v4"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -27,7 +27,7 @@ var _ cluster.StorageLookup = (*StorageLookup)(nil)
 func NewStorageLookup(pool *pgxpool.Pool, logger *slog.Logger, rootContext *actor.RootContext, waitingForActivationTimeout time.Duration) *StorageLookup {
 	return &StorageLookup{
 		pool:                        pool,
-		logger:                      logger,
+		logger:                      logger.With(slog.String("component", "postgresql.StorageLookup"), slog.String("ActorSystemId", rootContext.ActorSystem().ID)),
 		rootContext:                 rootContext,
 		waitingForActivationTimeout: waitingForActivationTimeout,
 	}
@@ -36,11 +36,17 @@ func NewStorageLookup(pool *pgxpool.Pool, logger *slog.Logger, rootContext *acto
 func (s *StorageLookup) Init() {
 	var err error
 	s.waiting, err = s.rootContext.SpawnNamed(actor.PropsFromProducer(func() actor.Actor {
-		return newActivationWaitingActor(s.pool, 10*time.Second)
+		return newActivationWaitingActor(s.pool, 10*time.Millisecond, s.logger)
 	}), "activation-waiting-actor")
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("failed to spawn activation waiting actor: %v", err))
 	}
+}
+
+func (s *StorageLookup) Shutdown() *cluster.ClusterIdentity {
+	s.logger.Info("shutting down")
+	s.rootContext.Stop(s.waiting)
+	return nil
 }
 
 func (s *StorageLookup) TryGetExistingActivation(clusterIdentity *cluster.ClusterIdentity) *cluster.StoredActivation {
@@ -67,14 +73,32 @@ func (s *StorageLookup) TryGetExistingActivation(clusterIdentity *cluster.Cluste
 func (s *StorageLookup) TryAcquireLock(clusterIdentity *cluster.ClusterIdentity) *cluster.SpawnLock {
 	lockId := shortuuid.New()
 	/// Lockのとりっぱなし防止のための削除を考える
-	_, err := s.pool.Exec(context2.Background(), "INSERT INTO spawn_locks (lock_id, identity, kind) VALUES ($1, $2, $3)", lockId, clusterIdentity.Identity, clusterIdentity.Kind)
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
-			s.logger.Info("lock already exists", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
-			return nil
-		}
 
+	activation := s.TryGetExistingActivation(clusterIdentity)
+	if activation != nil {
+		s.logger.Info("activation already exists", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
+		return nil
+	}
+
+	/// ロックが解除(Remove)されていてもロックから1minはロックは取れない
+	/// ロックが解除されていなくてもロックから1hour経過しているならロックは取れる
+	effect, err := s.pool.Exec(context2.Background(), `
+INSERT INTO spawn_locks (lock_id, identity, kind)
+VALUES ($1, $2, $3)
+ON CONFLICT (identity, kind) DO UPDATE
+    SET lock_id = $1, locked_at = NOW(), unlocked_at = NULL
+WHERE (spawn_locks.unlocked_at IS NOT NULL AND spawn_locks.locked_at < NOW() - INTERVAL '1 minute')
+   OR (spawn_locks.unlocked_at IS NULL AND spawn_locks.locked_at < NOW() - INTERVAL '1 hour');
+`,
+		lockId, clusterIdentity.Identity, clusterIdentity.Kind,
+	)
+	if err != nil {
 		s.logger.Error("error while inserting lock", slog.Any("error", err))
+		return nil
+	}
+
+	if effect.RowsAffected() == 0 {
+		s.logger.Info("lock already exists", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
 		return nil
 	}
 
@@ -85,6 +109,7 @@ func (s *StorageLookup) TryAcquireLock(clusterIdentity *cluster.ClusterIdentity)
 }
 
 func (s *StorageLookup) WaitForActivation(clusterIdentity *cluster.ClusterIdentity) *cluster.StoredActivation {
+	s.logger.Info("waiting for activation", slog.Any("identity", clusterIdentity.Identity), slog.Any("kind", clusterIdentity.Kind))
 	res, err := s.rootContext.RequestFuture(s.waiting, &AddWaiting{clusterIdentity: clusterIdentity}, s.waitingForActivationTimeout).Result()
 	if err != nil {
 		s.logger.Error("error while waiting for activation", slog.Any("error", err))
@@ -99,6 +124,8 @@ func (s *StorageLookup) WaitForActivation(clusterIdentity *cluster.ClusterIdenti
 		}
 	case *ActivationCancelled:
 		return nil
+	case *WaitActivationTimeout:
+		return nil
 	}
 
 	s.logger.Error("unexpected response", slog.Any("response", res))
@@ -106,6 +133,13 @@ func (s *StorageLookup) WaitForActivation(clusterIdentity *cluster.ClusterIdenti
 }
 
 func (s *StorageLookup) RemoveLock(spawnLock cluster.SpawnLock) {
+	_, err := s.pool.Exec(context2.Background(), "UPDATE spawn_locks SET unlocked_at = now() WHERE lock_id = $1", spawnLock.LockID)
+	if err != nil {
+		s.logger.Error("error while deleting lock", slog.Any("error", err))
+	}
+}
+
+func (s *StorageLookup) DeleteLock(spawnLock cluster.SpawnLock) {
 	_, err := s.pool.Exec(context2.Background(), "DELETE FROM spawn_locks WHERE lock_id = $1", spawnLock.LockID)
 	if err != nil {
 		s.logger.Error("error while deleting lock", slog.Any("error", err))

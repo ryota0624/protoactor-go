@@ -50,6 +50,7 @@ func RemotePlacementActor(address string) *actor.PID {
 
 // Get returns a PID for a given ClusterIdentity
 func (i *IdentityStorageLookup) Get(clusterIdentity *ClusterIdentity) *actor.PID {
+	i.system.Logger().Info("Get", slog.Any("clusterIdentity", clusterIdentity))
 	msg := newGetPid(clusterIdentity)
 	timeout := 5 * time.Second
 
@@ -107,6 +108,7 @@ func (i *IdentityStorageLookup) Setup(cluster *Cluster, _ []string, isClient boo
 	}
 
 	i.placementActor, err = i.system.Root.SpawnNamed(actor.PropsFromProducer(func() actor.Actor { return newIdentityStoragePlacementActor(cluster, i) }), placementActorName)
+	i.cluster.Logger().Info("placement actor started", slog.Any("actor", i.placementActor))
 	if err != nil {
 		panic(err)
 	}

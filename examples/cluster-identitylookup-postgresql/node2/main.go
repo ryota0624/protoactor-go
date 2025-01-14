@@ -4,6 +4,7 @@ import (
 	"fmt"
 	console "github.com/asynkron/goconsole"
 	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
+	"time"
 
 	"cluster-identitylookup-postgresql/shared"
 
@@ -13,11 +14,23 @@ import (
 )
 
 func main() {
-	cluster, clean := startNode()
+	c, clean := startNode(autoManagePorts[0])
 	defer clean()
-	pid := cluster.Get("abc", "hello")
+
+	c2, clean2 := startNode(autoManagePorts[1])
+	defer clean2()
+
+	for {
+		if c.MemberList.Length() > 1 {
+			break
+		}
+		c.Logger().Info("Waiting for other nodes to join")
+		time.Sleep(time.Second)
+	}
+
+	pid := c.Get("abc", "hello")
 	fmt.Printf("Got pid %v\n", pid)
-	res, _ := cluster.Request("abc", "hello", &shared.HelloRequest{Name: "Roger"})
+	res, _ := c.Request("abc", "hello", &shared.HelloRequest{Name: "Roger"})
 	fmt.Printf("Got response %v\n", res)
 	fmt.Print("\nBoot other nodes and press Enter\n")
 	for {
@@ -25,19 +38,44 @@ func main() {
 		if st == "exit" {
 			break
 		}
-		pid := cluster.Get("abc", "hello")
-		fmt.Printf("Got pid %v", pid)
-		res, _ := cluster.Request("abc", "hello", &shared.HelloRequest{Name: "Roger"})
-		fmt.Printf("Got response %v", res)
+		go func() {
+			messageToCluster(c, st)
+		}()
+		go func() {
+			messageToCluster(c2, st)
+		}()
 	}
 
-	cluster.Shutdown(true)
+	c.Shutdown(true)
 }
 
-func startNode() (*cluster.Cluster, func()) {
+func messageToCluster(c *cluster.Cluster, st string) {
+	pid := c.Get(st, "hello")
+	c.Logger().Info("Got pid %v", pid)
+	res, _ := c.Request(st, "hello", &shared.HelloRequest{Name: "Roger"})
+	c.Logger().Info("Got response %v", res)
+}
+
+var autoManagePorts = []int{
+	8081,
+	8082,
+	//8083,
+}
+
+var (
+	autoManageHosts []string
+)
+
+func init() {
+	for _, port := range autoManagePorts {
+		autoManageHosts = append(autoManageHosts, fmt.Sprintf("localhost:%v", port))
+	}
+}
+
+func startNode(autoManagePort int) (*cluster.Cluster, func()) {
 	system := actor.NewActorSystem()
 
-	provider := automanaged.New()
+	provider := automanaged.NewWithConfig(time.Second*2, autoManagePort, autoManageHosts...)
 	lookup, clean := shared.NewLockUp(system)
 	config := remote.Configure("localhost", 0)
 

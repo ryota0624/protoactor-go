@@ -1,6 +1,8 @@
 package actor
 
 import (
+	"log"
+	"runtime"
 	"time"
 )
 
@@ -22,6 +24,14 @@ type Supervisor interface {
 }
 
 func logFailure(actorSystem *ActorSystem, child *PID, reason interface{}, directive Directive) {
+	log.Printf("[ERROR] %s\n", reason)
+	for depth := 0; ; depth++ {
+		_, file, line, ok := runtime.Caller(depth)
+		if !ok {
+			break
+		}
+		log.Printf("======> %d: %v:%d", depth, file, line)
+	}
 	actorSystem.EventStream.Publish(&SupervisorEvent{
 		Child:     child,
 		Reason:    reason,

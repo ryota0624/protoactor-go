@@ -10,26 +10,32 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"log"
+	"sync"
 	"time"
 )
+
+var containerRunOnce = &sync.Once{}
+var postgresContainer *postgres.PostgresContainer
 
 func NewLockUp(actorSystem *actor.ActorSystem) (cluster.IdentityLookup, func()) {
 	ctx := context.Background()
 	dbName := "users"
 	dbUser := "user"
 	dbPassword := "password"
-
-	postgresContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase(dbName),
-		postgres.WithUsername(dbUser),
-		postgres.WithPassword(dbPassword),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(5*time.Second),
-		),
-	)
+	var err error
+	containerRunOnce.Do(func() {
+		postgresContainer, err = postgres.Run(ctx,
+			"postgres:16-alpine",
+			postgres.WithDatabase(dbName),
+			postgres.WithUsername(dbUser),
+			postgres.WithPassword(dbPassword),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(5*time.Second),
+			),
+		)
+	})
 
 	if err != nil {
 		log.Printf("failed to start container: %s", err)
@@ -37,7 +43,7 @@ func NewLockUp(actorSystem *actor.ActorSystem) (cluster.IdentityLookup, func()) 
 	}
 
 	connString := postgresContainer.MustConnectionString(ctx, "sslmode=disable", "application_name=test")
-
+	println(connString)
 	pool, err := pgxpool.New(context.Background(), connString)
 	if err != nil {
 		panic(err)
@@ -46,7 +52,9 @@ func NewLockUp(actorSystem *actor.ActorSystem) (cluster.IdentityLookup, func()) 
 	if err := prepareTables(ctx, connString); err != nil {
 		panic(err)
 	}
-	return cluster.NewIdentityStorageLookup(postgresql.NewStorageLookup(pool, actorSystem.Logger(), actorSystem.Root, time.Second)), func() {
+	postgresLookup := postgresql.NewStorageLookup(pool, actorSystem.Logger(), actorSystem.Root, time.Second*3)
+	postgresLookup.Init()
+	return cluster.NewIdentityStorageLookup(postgresLookup), func() {
 		if err := testcontainers.TerminateContainer(postgresContainer); err != nil {
 			log.Printf("failed to terminate container: %s", err)
 		}
@@ -67,8 +75,8 @@ CREATE TABLE IF NOT EXISTS spawn_locks
     identity  TEXT NOT NULL,
     kind      TEXT NOT NULL,
     locked_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    CONSTRAINT spawn_locks_pk PRIMARY KEY (lock_id),
-    UNIQUE (identity, kind)
+    unlocked_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (identity, kind)
 );
 
 `,

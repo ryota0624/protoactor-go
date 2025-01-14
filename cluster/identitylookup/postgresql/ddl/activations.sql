@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS activations
     lock_id      TEXT  NOT NULL,
     activated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     PRIMARY KEY (identity, kind),
+    -- lockの無効化を考慮したい
     FOREIGN KEY (lock_id) references spawn_locks (lock_id)
 
 );
