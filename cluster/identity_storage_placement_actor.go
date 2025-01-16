@@ -94,10 +94,28 @@ func (i *IdentityStoragePlacementActor) onActivationRequest(context actor.Contex
 func (i *IdentityStoragePlacementActor) spawnActor(ctx actor.Context, req *ActivationRequest, kind *ActivatedKind) {
 	props := WithClusterIdentity(kind.Props, req.ClusterIdentity)
 	pid := ctx.SpawnPrefix(props, req.ClusterIdentity.Identity)
+
+	storeActivation := func(pid *actor.PID) (ok bool) {
+		ok = false
+		defer func() {
+			if r := recover(); r != nil {
+				i.logger.Error("Failed to store activation", slog.Any("error", r))
+				ctx.Stop(pid)
+				ok = false
+			}
+		}()
+		i.identityStorageLookup.Storage.StoreActivation(i.cluster.ActorSystem.ID, newSpawnLock(req.RequestId, req.ClusterIdentity), pid)
+		return true
+	}
+
+	ok := storeActivation(pid)
+	if !ok {
+		ctx.Respond(&ActivationResponse{Pid: nil, Failed: true})
+		return
+	}
 	kind.Inc()
 
 	/// TODO: member selectionを考慮
-	i.identityStorageLookup.Storage.StoreActivation(i.cluster.ActorSystem.ID, newSpawnLock(req.RequestId, req.ClusterIdentity), pid)
 	i.logger.Info("Activation Stored", slog.Any("pid", pid), slog.Any("clusterIdentity", req.ClusterIdentity), slog.String("key", req.ClusterIdentity.AsKey()))
 	i.actors[req.ClusterIdentity.AsKey()] = GrainMeta{
 		ID:  req.ClusterIdentity,

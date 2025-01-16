@@ -174,8 +174,6 @@ SELECT * FROM activations WHERE identity_key = ANY($1)
 }
 
 func (a *ActivationWaitingActor) onStopping(context actor.Context) {
-	/// TODO: clusterの停止に伴ってすべての待ちリストへゴメンを送る
-
 	if a.cancelScheduler != nil {
 		a.cancelScheduler()
 	}
