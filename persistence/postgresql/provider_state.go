@@ -1,7 +1,7 @@
 package postgresql
 
 import (
-	context2 "context"
+	goCtx "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,7 +47,7 @@ func NewProviderState(conn *pgxpool.Pool, logger *slog.Logger) *ProviderState {
 }
 
 func (s *ProviderState) GetSnapshot(actorName string) (snapshot interface{}, eventIndex int, ok bool) {
-	rows, err := s.connPool.Query(context2.Background(),
+	rows, err := s.connPool.Query(goCtx.Background(),
 		"SELECT actor_name, snapshot, message_type, snapshot_index FROM snapshots WHERE actor_name = $1 ORDER BY snapshot_index DESC LIMIT 1", actorName,
 	)
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *ProviderState) PersistSnapshot(actorName string, snapshotIndex int, sna
 	if err != nil {
 		panic(newPersistenceError(fmt.Errorf("error marshalling snapshot: %w", err)))
 	}
-	_, err = s.connPool.Exec(context2.Background(),
+	_, err = s.connPool.Exec(goCtx.Background(),
 		`
 INSERT INTO snapshots (actor_name, snapshot, message_type, snapshot_index) 
 	VALUES ($1, $2, $3, $4)
@@ -90,7 +90,7 @@ INSERT INTO snapshots (actor_name, snapshot, message_type, snapshot_index)
 }
 
 func (s *ProviderState) DeleteSnapshots(actorName string, inclusiveToIndex int) {
-	_, err := s.connPool.Exec(context2.Background(),
+	_, err := s.connPool.Exec(goCtx.Background(),
 		"DELETE FROM snapshots WHERE actor_name = $1 AND snapshot_index <= $2",
 		actorName, inclusiveToIndex)
 	if err != nil {
@@ -102,7 +102,7 @@ func (s *ProviderState) GetEvents(actorName string, eventIndexStart int, eventIn
 	if eventIndexEnd == 0 {
 		eventIndexEnd = 9999
 	}
-	rows, err := s.connPool.Query(context2.Background(),
+	rows, err := s.connPool.Query(goCtx.Background(),
 		"SELECT actor_name, event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3 ORDER BY event_index",
 		actorName, eventIndexStart, eventIndexEnd)
 	if err != nil {
@@ -132,16 +132,22 @@ func (s *ProviderState) PersistEvent(actorName string, eventIndex int, event pro
 	if err != nil {
 		panic(newPersistenceError(fmt.Errorf("error marshalling event: %w", err)))
 	}
-	_, err = s.connPool.Exec(context2.Background(),
-		"INSERT INTO event_journals (actor_name, event, message_type, event_index) VALUES ($1, $2, $3, $4)",
-		actorName, bytes, proto.MessageName(event), eventIndex)
+	_, err = s.connPool.Exec(goCtx.Background(),
+		`INSERT INTO 
+    				event_journals (actor_name, event, message_type, event_index) 
+					VALUES ($1, $2, $3, $4)`,
+		actorName,
+		bytes,
+		proto.MessageName(event),
+		eventIndex,
+	)
 	if err != nil {
 		panic(newPersistenceError(fmt.Errorf("error persisting event: %w", err)))
 	}
 }
 
 func (s *ProviderState) DeleteEvents(actorName string, inclusiveToIndex int) {
-	_, err := s.connPool.Exec(context2.Background(),
+	_, err := s.connPool.Exec(goCtx.Background(),
 		"DELETE FROM event_journals WHERE actor_name = $1 AND event_index <= $2",
 		actorName, inclusiveToIndex)
 	if err != nil {
