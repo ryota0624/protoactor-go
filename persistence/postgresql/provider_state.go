@@ -103,7 +103,13 @@ func (s *ProviderState) GetEvents(actorName string, eventIndexStart int, eventIn
 		eventIndexEnd = 9999
 	}
 	rows, err := s.connPool.Query(goCtx.Background(),
-		"SELECT actor_name, event, message_type, event_index FROM event_journals WHERE actor_name = $1 AND event_index >= $2 AND event_index <= $3 ORDER BY event_index",
+		`SELECT
+    				actor_name, event, message_type, event_index 
+					FROM event_journals 
+					WHERE 
+					  actor_name = $1 AND event_index >= $2 AND event_index <= $3 
+					ORDER BY event_index
+					`,
 		actorName, eventIndexStart, eventIndexEnd)
 	if err != nil {
 		s.logger.Error("Error getting events", slog.Any("error", err))
