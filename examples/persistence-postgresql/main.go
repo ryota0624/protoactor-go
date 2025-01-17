@@ -374,10 +374,10 @@ func main() {
 	rootContext := system.Root
 	props := actor.PropsFromProducer(func() actor.Actor { return &Actor{} },
 		actor.WithReceiverMiddleware(postgresql.HandlePersistenceError(), persistence.Using(provider)))
-	pid, _ := rootContext.SpawnNamed(props, "persistent")
-	rootContext.Send(pid, &Message{state: "state4"})
-	rootContext.Send(pid, &Message{state: "state5"})
-	if result, err := rootContext.RequestFuture(pid, &Message{state: "state6"}, time.Second*1).Result(); err != nil {
+	pid, _ := rootContext.SpawnNamed(props, "echoActor")
+	rootContext.Send(pid, &Message{state: "state1"})
+	rootContext.Send(pid, &Message{state: "state2"})
+	if result, err := rootContext.RequestFuture(pid, &Message{state: "state3"}, time.Second*1).Result(); err != nil {
 		fmt.Printf("request error err=%v\n", err)
 	} else {
 		fmt.Printf("response=%v\n", result)
