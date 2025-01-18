@@ -19,6 +19,8 @@ type Mixin struct {
 	name          string
 	receiver      receiver
 	recovering    bool
+	sender        sender
+	self          *actor.PID
 }
 
 // enforces that Mixin implements persistent interface
@@ -36,7 +38,7 @@ func (mixin *Mixin) Name() string {
 func (mixin *Mixin) PersistReceive(message proto.Message) {
 	mixin.providerState.PersistEvent(mixin.Name(), mixin.eventIndex, message)
 	if mixin.eventIndex%mixin.providerState.GetSnapshotInterval() == 0 {
-		mixin.receiver.Receive(&actor.MessageEnvelope{Message: &RequestSnapshot{}})
+		mixin.sender.Send(mixin.self, &RequestSnapshot{})
 	}
 	mixin.eventIndex++
 }
@@ -51,11 +53,14 @@ func (mixin *Mixin) init(provider Provider, context actor.Context) {
 	}
 
 	receiver := context.(receiver)
+	sender := context.(sender)
 
 	mixin.name = context.Self().Id
 	mixin.eventIndex = 0
 	mixin.receiver = receiver
 	mixin.recovering = true
+	mixin.sender = sender
+	mixin.self = context.Self()
 
 	mixin.providerState.Restart()
 	if snapshot, eventIndex, ok := mixin.providerState.GetSnapshot(mixin.Name()); ok {
@@ -72,4 +77,8 @@ func (mixin *Mixin) init(provider Provider, context actor.Context) {
 
 type receiver interface {
 	Receive(message *actor.MessageEnvelope)
+}
+
+type sender interface {
+	Send(pid *actor.PID, message interface{})
 }
