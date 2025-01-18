@@ -37,13 +37,14 @@ func IsPersistenceError(err error) bool {
 }
 
 type ProviderState struct {
-	connPool *pgxpool.Pool
-	logger   *slog.Logger
-	wg       sync.WaitGroup
+	connPool         *pgxpool.Pool
+	logger           *slog.Logger
+	wg               sync.WaitGroup
+	snapshotInterval int
 }
 
-func NewProviderState(conn *pgxpool.Pool, logger *slog.Logger) *ProviderState {
-	return &ProviderState{connPool: conn, logger: logger}
+func NewProviderState(conn *pgxpool.Pool, logger *slog.Logger, snapshotInterval int) *ProviderState {
+	return &ProviderState{connPool: conn, logger: logger, snapshotInterval: snapshotInterval}
 }
 
 func (s *ProviderState) GetSnapshot(actorName string) (snapshot interface{}, eventIndex int, ok bool) {
@@ -166,7 +167,7 @@ func (s *ProviderState) Restart() {
 }
 
 func (s *ProviderState) GetSnapshotInterval() int {
-	return 1
+	return s.snapshotInterval
 }
 
 var _ persistence.ProviderState = &ProviderState{}

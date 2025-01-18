@@ -7,16 +7,17 @@ import (
 )
 
 type Provider struct {
-	pool        *pgxpool.Pool
-	actorSystem *actor.ActorSystem
+	pool             *pgxpool.Pool
+	actorSystem      *actor.ActorSystem
+	snapshotInterval int
 }
 
-func NewProvider(pool *pgxpool.Pool, actorSystem *actor.ActorSystem) *Provider {
-	return &Provider{pool: pool, actorSystem: actorSystem}
+func NewProvider(pool *pgxpool.Pool, actorSystem *actor.ActorSystem, snapshotInterval int) *Provider {
+	return &Provider{pool: pool, actorSystem: actorSystem, snapshotInterval: snapshotInterval}
 }
 
 func (p *Provider) GetState() persistence.ProviderState {
-	return NewProviderState(p.pool, p.actorSystem.Logger())
+	return NewProviderState(p.pool, p.actorSystem.Logger(), p.snapshotInterval)
 }
 
 var _ persistence.Provider = &Provider{}
