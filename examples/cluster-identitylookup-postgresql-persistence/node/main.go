@@ -5,6 +5,8 @@ import (
 	console "github.com/asynkron/goconsole"
 	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
 	"github.com/asynkron/protoactor-go/persistence"
+	"log"
+	"log/slog"
 	"time"
 
 	"cluster-identitylookup-postgresql-persistence/shared"
@@ -50,8 +52,16 @@ func main() {
 func messageToCluster(c *cluster.Cluster, st string, i int) {
 	pid := c.Get(st, "hello")
 	c.Logger().Info("Got pid %v", pid)
-	res, _ := c.Request(st, "hello", &shared.HelloRequest{Name: fmt.Sprintf("message %v", i)})
-	c.Logger().Info("Got response %v", res)
+	f, err := c.RequestFuture(st, "hello", &shared.HelloRequest{Name: fmt.Sprintf("message %v", i)}, cluster.WithTimeout(time.Second))
+	if err != nil {
+		log.Printf("failed to request: %s", err)
+	}
+
+	res, err := f.Result()
+	if err != nil {
+		log.Printf("failed to get result: %s", err)
+	}
+	c.Logger().Info("Got response", slog.Any("res", res))
 }
 
 var autoManagePorts = []int{
@@ -78,10 +88,15 @@ func startNode(autoManagePort int) (*cluster.Cluster, func()) {
 	config := remote.Configure("localhost", 0)
 
 	props := actor.PropsFromProducer(func() actor.Actor {
-		return &HelloActor{}
-	}, actor.WithReceiverMiddleware(
-		persistence.Using(persistenceProvider),
-	))
+		return &PersistenceActorActivator{
+			persistenceActorProps: actor.PropsFromProducer(func() actor.Actor {
+				return &HelloActor{}
+			}, actor.WithReceiverMiddleware(
+				persistence.Using(persistenceProvider),
+			)),
+		}
+	})
+
 	helloKind := cluster.NewKind("hello", props)
 	clusterConfig := cluster.Configure("my-cluster", provider, lookup, config, cluster.WithKinds(helloKind))
 	c := cluster.New(system, clusterConfig)
@@ -89,6 +104,38 @@ func startNode(autoManagePort int) (*cluster.Cluster, func()) {
 	c.StartMember()
 
 	return c, clean
+}
+
+type PersistenceActorActivator struct {
+	persistenceActorProps *actor.Props
+	persistenceActorName  string
+}
+
+func (a *PersistenceActorActivator) Receive(ctx actor.Context) {
+	switch ctx.Message().(type) {
+	case *actor.Started:
+		clusterIdentity := cluster.GetClusterIdentity(ctx)
+		if clusterIdentity != nil {
+			a.persistenceActorName = fmt.Sprintf("%s-%s", clusterIdentity.Kind, clusterIdentity.Identity)
+		}
+		log.Println("proxy actor started")
+	case *actor.Stopped:
+		log.Println("proxy actor stopped")
+	default:
+
+		if _, ok := ctx.Message().(actor.SystemMessage); ok {
+			return
+		}
+		id, err := ctx.ActorSystem().Root.SpawnNamed(a.persistenceActorProps, a.persistenceActorName)
+		if err != nil {
+			log.Printf("failed to spawn actor: %s", err)
+		}
+
+		ctx.RequestWithCustomSender(id, ctx.Message(), ctx.Sender())
+		if err := ctx.PoisonFuture(id).Wait(); err != nil {
+			log.Printf("failed to poison actor: %s", err)
+		}
+	}
 }
 
 type HelloActor struct {
@@ -112,6 +159,13 @@ func (h *HelloActor) Receive(ctx actor.Context) {
 		}
 		h.PersistReceive(msg)
 		fmt.Printf("Hello %v\n", msg.Name)
-		ctx.Respond(&shared.HelloResponse{})
+		if ctx.Sender() != nil {
+			fmt.Printf("Sender %v\n", ctx.Sender())
+			ctx.Respond(&shared.HelloRequest{
+				Name: "iam response",
+			})
+		} else {
+			fmt.Printf("No sender\n")
+		}
 	}
 }
