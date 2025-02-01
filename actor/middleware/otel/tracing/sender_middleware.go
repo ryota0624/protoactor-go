@@ -58,6 +58,7 @@ func RootContextSenderMiddleware() actor.SenderMiddleware {
 			span.SetAttributes(attribute.String("SenderActorPID", c.Self().String()))
 			span.SetAttributes(attribute.String("SenderActorType", fmt.Sprintf("%T", c.Actor())))
 			span.SetAttributes(attribute.String("TargetActorPID", target.String()))
+			span.SetAttributes(attribute.String("SenderAddress", c.ActorSystem().Address()))
 			span.SetAttributes(attribute.String("MessageType", fmt.Sprintf("%T", envelope.Message)))
 			setSpanContextToEnvelope(trace.SpanContextFromContext(
 				ctxWithCurrentSpan,
