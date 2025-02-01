@@ -48,25 +48,176 @@ metadata:
   labels:
     app: kubernetes-sample
 spec:
-    replicas: 1
-    selector:
-      matchLabels:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubernetes-sample
+  template:
+    metadata:
+      namespace: kubernetes-sample
+      labels:
         app: kubernetes-sample
-    template:
-      metadata:
-        namespace: kubernetes-sample
-        labels:
-          app: kubernetes-sample
-      spec:
-        serviceAccountName: kubernetes-sample
-        containers:
-          - name: kubernetes-sample
-            image: kubernetes-sample:latest
-            imagePullPolicy: Never # docker desktop
-            env:
-              - name: PROTOHOST
-                valueFrom:
-                  fieldRef:
-                    fieldPath: status.podIP
-              - name: PROTOPORT
-                value: "50051"
+    spec:
+      serviceAccountName: kubernetes-sample
+      containers:
+        - name: kubernetes-sample
+          image: kubernetes-sample:latest
+          imagePullPolicy: Never # docker desktop
+          env:
+            - name: PROTOHOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: PROTOPORT
+              value: "50051"
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: kubernetes-sample
+data:
+  config.yaml: |-
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+      file:
+        path: /dev/stdout
+      otlp/jaeger:
+        endpoint: jaeger:4317
+        tls:
+          insecure: true
+    service:
+      pipelines:
+        metrics:
+          receivers: [ otlp ]
+          exporters: [ prometheus ]
+        traces:
+          receivers: [ otlp ]
+          exporters: [ otlp/jaeger, file ]
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: kubernetes-sample
+  name: otel-collector
+  labels:
+    app: opentelemetry
+    component: otel-collector
+spec:
+  selector:
+    matchLabels:
+      app: opentelemetry
+      component: otel-collector
+  template:
+    metadata:
+      labels:
+        app: opentelemetry
+        component: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.118.0
+          resources:
+            limits:
+              cpu: 100m
+              memory: 200Mi
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - mountPath: /etc/otelcol-contrib/config.yaml
+              name: data
+              subPath: config.yaml
+              readOnly: true
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: data
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: kubernetes-sample
+  labels:
+    app: opentelemetry
+    component: otel-collector
+spec:
+  ports:
+    - name: metrics # Default endpoint for querying metrics.
+      port: 8889
+    - name: trace # Default endpoint for sending trace data.
+      port: 4317
+  selector:
+    component: otel-collector
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  labels:
+    app: jaeger
+  namespace: kubernetes-sample
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/opentelemetry-all-in-one
+          ports:
+            - containerPort: 16686
+            - containerPort: 55680
+            - containerPort: 14268
+            - containerPort: 4317
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: kubernetes-sample
+spec:
+  selector:
+    app: jaeger
+  ports:
+    - name: ui
+      protocol: TCP
+      port: 16686
+      targetPort: 16686
+    - name: grpc
+      protocol: TCP
+      port: 55680
+      targetPort: 55680
+    - name: http
+      protocol: TCP
+      port: 14268
+      targetPort: 14268
+    - name: otlp
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+  type: ClusterIP
