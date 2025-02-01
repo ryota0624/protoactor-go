@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -37,8 +39,10 @@ func sendMessages(ctx context.Context, c *cluster.Cluster) {
 		case <-ctx.Done():
 			return
 		case <-time.After(5 * time.Second):
+			identity := strconv.Itoa(rand.Int())
+			log.Printf("Sending message to %s\n", identity)
 			if _, err := c.Request(
-				"some-actor-123",
+				identity,
 				"helloKind",
 				&HelloRequest{Name: fmt.Sprintf("Hello from %s", c.ActorSystem.ID)}); err != nil {
 				log.Printf("Error calling actor: %v\n", err)
@@ -52,7 +56,7 @@ func sendMessages(ctx context.Context, c *cluster.Cluster) {
 func helloGrainReceive(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 	case *HelloRequest:
-		log.Printf("Got hello %v\n", msg)
+		log.Printf("Got hello %v iam %s\n", msg, ctx.Self().String())
 		ctx.Respond(&HelloResponse{})
 	}
 }
